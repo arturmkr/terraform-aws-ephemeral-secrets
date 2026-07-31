@@ -1,0 +1,13 @@
+aws_region       = "eu-central-1"
+application_name = "orders-api"
+environment      = "dev"
+
+tags = {
+  Project = "secure-aws-secrets-provisioning"
+  Owner   = "platform-team"
+}
+
+# Omitted secrets use value_version = 1. Persist only deliberate rotations.
+value_versions = {
+  "service-password" = 1
+}

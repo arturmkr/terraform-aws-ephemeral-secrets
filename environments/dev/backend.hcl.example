@@ -1,0 +1,5 @@
+bucket       = "replace-with-bootstrap-output"
+key          = "secure-aws-secrets-provisioning/dev/terraform.tfstate"
+region       = "eu-central-1"
+use_lockfile = true
+encrypt      = true
