@@ -227,16 +227,14 @@ Manager receives a new value only when the durable version counter changes.
 
 ## Bootstrap the backend
 
-Bootstrap is an independent root with local state. It creates an S3 bucket with
+Bootstrap is an independent Terraform root. It creates an S3 bucket with
 versioning, SSE-S3 encryption, all public-access blocks, bucket-owner-enforced
 ownership, a TLS-only policy, and deletion protection.
 
-```bash
-cp bootstrap/terraform.tfvars.example bootstrap/terraform.tfvars
-terraform -chdir=bootstrap init
-terraform -chdir=bootstrap plan -out=bootstrap.tfplan
-terraform -chdir=bootstrap apply bootstrap.tfplan
-```
+Set the `AWS_REGION` and `TF_STATE_BUCKET` repository variables, then run
+**Actions → Bootstrap Terraform backend → Run workflow** once. The workflow
+creates the bucket and stores its own state at
+`bootstrap/terraform.tfstate` inside that bucket.
 
 Native S3 state locking is enabled with `use_lockfile = true`; no DynamoDB table
 is required.
@@ -261,9 +259,8 @@ non-secret rotation counter.
 
 ## GitHub Actions deployment
 
-The S3 backend must exist before GitHub Actions can run Terraform against it.
-Create it once from a trusted workstation using the bootstrap commands above.
-Do not commit the AWS credentials or `terraform.tfvars`.
+The S3 backend must exist before the pull-request plan and deployment workflows
+can run. Create it once using the bootstrap workflow above.
 
 In the GitHub repository, open **Settings → Secrets and variables → Actions**
 and configure the following repository secrets:
@@ -278,7 +275,7 @@ Configure these repository variables in the same section:
 | Repository variable | Example |
 |---|---|
 | `AWS_REGION` | `eu-central-1` |
-| `TF_STATE_BUCKET` | Name returned by the bootstrap output |
+| `TF_STATE_BUCKET` | Globally unique bucket name chosen before bootstrap |
 | `TF_STATE_KEY` | `secure-aws-secrets-provisioning/dev/terraform.tfstate` |
 | `APPLICATION_NAME` | `orders-api` |
 
@@ -291,8 +288,10 @@ Create a GitHub Environment named `dev`. For a portfolio or production-like
 setup, configure a required reviewer on that environment. The apply job cannot
 start until the environment approval is granted.
 
-Two workflows are included:
+Three workflows are included:
 
+- [bootstrap.yml](.github/workflows/bootstrap.yml) is a one-time manual workflow
+  that creates the S3 backend before application planning or deployment.
 - [pull-request.yml](.github/workflows/pull-request.yml) always runs formatting,
   offline initialization, validation, and repository checks. For pull requests
   from this repository, it also authenticates to AWS, initializes the real S3
