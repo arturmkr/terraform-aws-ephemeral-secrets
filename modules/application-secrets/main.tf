@@ -6,41 +6,66 @@ locals {
     ManagedBy   = "Terraform"
   })
 
-  secret_names = concat(
-    keys(var.hex_tokens),
-    keys(var.username_passwords),
-    keys(var.client_credentials),
-    keys(var.plain_passwords),
-    keys(var.tls_private_keys),
-    keys(var.multi_user_documents),
-  )
-
-  # Every secret starts at version 1. Only rotated secrets need an entry in
-  # value_versions, so adding a new secret remains a single catalog entry.
+  # Application secret catalog. Add another entry to the matching collection
+  # to provision another secret of that format.
   hex_tokens = {
-    for name, config in var.hex_tokens :
-    name => merge(config, { value_version = lookup(var.value_versions, name, 1) })
+    "shared-key" = {
+      description   = "256-bit shared key used for service-to-service authentication"
+      length        = 64
+      tags          = {}
+      value_version = lookup(var.value_versions, "shared-key", 1)
+    }
   }
   username_passwords = {
-    for name, config in var.username_passwords :
-    name => merge(config, { value_version = lookup(var.value_versions, name, 1) })
+    "database-credentials" = {
+      description     = "Database login and generated password"
+      username        = "application-user"
+      password_length = 32
+      tags            = {}
+      value_version   = lookup(var.value_versions, "database-credentials", 1)
+    }
   }
   client_credentials = {
-    for name, config in var.client_credentials :
-    name => merge(config, { value_version = lookup(var.value_versions, name, 1) })
+    "oauth-client" = {
+      description   = "OAuth client ID and generated client secret"
+      client_id     = "application-client"
+      secret_length = 40
+      tags          = {}
+      value_version = lookup(var.value_versions, "oauth-client", 1)
+    }
   }
   plain_passwords = {
-    for name, config in var.plain_passwords :
-    name => merge(config, { value_version = lookup(var.value_versions, name, 1) })
+    "service-password" = {
+      description   = "Generated password consumed as a plain string"
+      length        = 40
+      tags          = {}
+      value_version = lookup(var.value_versions, "service-password", 1)
+    }
   }
   tls_private_keys = {
-    for name, config in var.tls_private_keys :
-    name => merge(config, { value_version = lookup(var.value_versions, name, 1) })
+    "service-private-key" = {
+      description   = "ECDSA P-384 private key and corresponding public key"
+      tags          = {}
+      value_version = lookup(var.value_versions, "service-private-key", 1)
+    }
   }
   multi_user_documents = {
-    for name, config in var.multi_user_documents :
-    name => merge(config, { value_version = lookup(var.value_versions, name, 1) })
+    "application-users" = {
+      description   = "Base64-encoded user document containing bcrypt password hashes"
+      usernames     = ["service-reader", "service-writer", "service-admin"]
+      tags          = {}
+      value_version = lookup(var.value_versions, "application-users", 1)
+    }
   }
+
+  secret_names = concat(
+    keys(local.hex_tokens),
+    keys(local.username_passwords),
+    keys(local.client_credentials),
+    keys(local.plain_passwords),
+    keys(local.tls_private_keys),
+    keys(local.multi_user_documents),
+  )
 }
 
 check "unique_secret_names" {
@@ -61,7 +86,7 @@ module "hex_tokens" {
   source = "../builders/hex-token"
 
   tokens = {
-    for name, config in var.hex_tokens : name => {
+    for name, config in local.hex_tokens : name => {
       length = config.length
     }
   }
@@ -71,7 +96,7 @@ module "username_passwords" {
   source = "../builders/username-password"
 
   credentials = {
-    for name, config in var.username_passwords : name => {
+    for name, config in local.username_passwords : name => {
       username        = config.username
       password_length = config.password_length
     }
@@ -83,7 +108,7 @@ module "client_credentials" {
 
   environment = var.environment
   clients = {
-    for name, config in var.client_credentials : name => {
+    for name, config in local.client_credentials : name => {
       client_id     = config.client_id
       secret_length = config.secret_length
     }
@@ -94,7 +119,7 @@ module "plain_passwords" {
   source = "../builders/plain-password"
 
   passwords = {
-    for name, config in var.plain_passwords : name => {
+    for name, config in local.plain_passwords : name => {
       length = config.length
     }
   }
@@ -103,14 +128,14 @@ module "plain_passwords" {
 module "tls_private_keys" {
   source = "../builders/tls-private-key"
 
-  keys = { for name in keys(var.tls_private_keys) : name => {} }
+  keys = { for name in keys(local.tls_private_keys) : name => {} }
 }
 
 module "multi_user_documents" {
   source = "../builders/multi-user-document"
 
   documents = {
-    for name, config in var.multi_user_documents : name => {
+    for name, config in local.multi_user_documents : name => {
       usernames = config.usernames
     }
   }

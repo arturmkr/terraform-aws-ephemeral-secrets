@@ -1,4 +1,4 @@
-name: Deploy dev secrets
+name: Terraform infrastructure
 
 on:
   push:
@@ -8,6 +8,15 @@ on:
       - "modules/**"
       - ".github/workflows/deploy.yml"
   workflow_dispatch:
+    inputs:
+      action:
+        description: Terraform action
+        required: true
+        default: apply
+        type: choice
+        options:
+          - apply
+          - destroy
 
 permissions:
   contents: read
@@ -25,10 +34,11 @@ env:
   TF_STATE_KEY: ${{ vars.TF_STATE_KEY }}
   TF_VAR_application_name: ${{ vars.APPLICATION_NAME }}
   TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+  TF_ACTION: ${{ github.event_name == 'workflow_dispatch' && inputs.action || 'apply' }}
 
 jobs:
-  apply:
-    name: Apply dev
+  terraform:
+    name: Terraform ${{ github.event_name == 'workflow_dispatch' && inputs.action || 'apply' }}
     runs-on: ubuntu-latest
     environment: dev
     steps:
@@ -59,8 +69,13 @@ jobs:
       - name: Validate configuration
         run: terraform -chdir=environments/dev validate
 
-      - name: Create apply plan
-        run: terraform -chdir=environments/dev plan -input=false -no-color -out=tfplan
+      - name: Create Terraform plan
+        run: |
+          if [[ "${TF_ACTION}" == "destroy" ]]; then
+            terraform -chdir=environments/dev plan -destroy -input=false -no-color -out=tfplan
+          else
+            terraform -chdir=environments/dev plan -input=false -no-color -out=tfplan
+          fi
 
-      - name: Apply dev
+      - name: Apply Terraform plan
         run: terraform -chdir=environments/dev apply -input=false tfplan
