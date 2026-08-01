@@ -43,10 +43,3 @@ variable "value_versions" {
     error_message = "Every value version must be a positive integer."
   }
 }
-
-variable "verification_tag" {
-  description = "Optional non-secret tag used only by the lifecycle verification script."
-  type        = string
-  default     = null
-  nullable    = true
-}

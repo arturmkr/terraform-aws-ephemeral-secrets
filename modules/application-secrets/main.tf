@@ -25,23 +25,6 @@ locals {
       value_version   = lookup(var.value_versions, "database-credentials", 1)
     }
   }
-  client_credentials = {
-    "oauth-client" = {
-      description   = "OAuth client ID and generated client secret"
-      client_id     = "application-client"
-      secret_length = 40
-      tags          = {}
-      value_version = lookup(var.value_versions, "oauth-client", 1)
-    }
-  }
-  plain_passwords = {
-    "service-password" = {
-      description   = "Generated password consumed as a plain string"
-      length        = 40
-      tags          = {}
-      value_version = lookup(var.value_versions, "service-password", 1)
-    }
-  }
   tls_private_keys = {
     "service-private-key" = {
       description   = "ECDSA P-384 private key and corresponding public key"
@@ -61,8 +44,6 @@ locals {
   secret_names = concat(
     keys(local.hex_tokens),
     keys(local.username_passwords),
-    keys(local.client_credentials),
-    keys(local.plain_passwords),
     keys(local.tls_private_keys),
     keys(local.multi_user_documents),
   )
@@ -99,28 +80,6 @@ module "username_passwords" {
     for name, config in local.username_passwords : name => {
       username        = config.username
       password_length = config.password_length
-    }
-  }
-}
-
-module "client_credentials" {
-  source = "../builders/client-credentials"
-
-  environment = var.environment
-  clients = {
-    for name, config in local.client_credentials : name => {
-      client_id     = config.client_id
-      secret_length = config.secret_length
-    }
-  }
-}
-
-module "plain_passwords" {
-  source = "../builders/plain-password"
-
-  passwords = {
-    for name, config in local.plain_passwords : name => {
-      length = config.length
     }
   }
 }
@@ -162,28 +121,6 @@ module "username_password_secrets" {
   description   = each.value.description
   tags          = merge(local.common_tags, each.value.tags, { SecretFormat = "username-password" })
   secret_value  = module.username_passwords.values[each.key]
-  value_version = each.value.value_version
-}
-
-module "client_credential_secrets" {
-  for_each = local.client_credentials
-  source   = "../aws-secret"
-
-  name          = "${local.name_prefix}/${each.key}"
-  description   = each.value.description
-  tags          = merge(local.common_tags, each.value.tags, { SecretFormat = "client-credentials" })
-  secret_value  = module.client_credentials.values[each.key]
-  value_version = each.value.value_version
-}
-
-module "plain_password_secrets" {
-  for_each = local.plain_passwords
-  source   = "../aws-secret"
-
-  name          = "${local.name_prefix}/${each.key}"
-  description   = each.value.description
-  tags          = merge(local.common_tags, each.value.tags, { SecretFormat = "plain-password" })
-  secret_value  = module.plain_passwords.values[each.key]
   value_version = each.value.value_version
 }
 

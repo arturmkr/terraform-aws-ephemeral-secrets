@@ -9,5 +9,5 @@ tags = {
 
 # Omitted secrets use value_version = 1. Persist only deliberate rotations.
 value_versions = {
-  "service-password" = 1
+  "shared-key" = 1
 }
