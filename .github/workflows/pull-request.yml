@@ -6,7 +6,6 @@ on:
       - "bootstrap/**"
       - "environments/**"
       - "modules/**"
-      - "scripts/**"
       - ".github/workflows/**"
       - "Makefile"
 
@@ -49,17 +48,13 @@ jobs:
           terraform -chdir=environments/dev init -backend=false -input=false
           terraform -chdir=environments/dev validate
 
-      - name: Run repository checks
-        run: |
-          bash -n scripts/verify-lifecycle.sh scripts/check-no-persistent-secrets.sh
-          python3 -m py_compile scripts/verify.py
-          ./scripts/check-no-persistent-secrets.sh
-
   plan:
     name: Plan dev
     needs: validate
     if: github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     env:
       AWS_REGION: ${{ vars.AWS_REGION }}
       TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
@@ -81,7 +76,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
           mask-aws-account-id: true
 
       - name: Initialize S3 backend

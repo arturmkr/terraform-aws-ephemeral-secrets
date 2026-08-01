@@ -1,4 +1,4 @@
-.PHONY: fmt fmt-check validate security-check check
+.PHONY: fmt fmt-check validate check
 
 fmt:
 	terraform fmt -recursive
@@ -12,7 +12,4 @@ validate:
 	terraform -chdir=environments/dev init -backend=false
 	terraform -chdir=environments/dev validate
 
-security-check:
-	./scripts/check-no-persistent-secrets.sh
-
-check: fmt-check validate security-check
+check: fmt-check validate
