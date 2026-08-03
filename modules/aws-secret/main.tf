@@ -11,5 +11,5 @@ resource "aws_secretsmanager_secret" "this" {
 resource "aws_secretsmanager_secret_version" "current" {
   secret_id                = aws_secretsmanager_secret.this.id
   secret_string_wo         = var.secret_value
-  secret_string_wo_version = var.value_version
+  secret_string_wo_version = var.secret_version
 }
