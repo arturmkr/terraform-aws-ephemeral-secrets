@@ -30,8 +30,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ inputs.target }}
     env:
-      TF_STATE_REGION: ${{ vars.TF_STATE_REGION }}
-      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      TF_STATE_REGION: ${{ secrets.TF_STATE_REGION }}
+      TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
