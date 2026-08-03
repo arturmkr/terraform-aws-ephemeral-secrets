@@ -1,7 +1,16 @@
-name: Bootstrap Terraform backend
+name: Infra Bootstrap
+run-name: Create state backend · ${{ inputs.target }}
 
 on:
   workflow_dispatch:
+    inputs:
+      target:
+        description: Environment backend to create
+        required: true
+        type: choice
+        options:
+          - dev
+          - stage
 
 permissions:
   contents: read
@@ -10,13 +19,19 @@ env:
   TF_IN_AUTOMATION: "true"
   TF_INPUT: "false"
   TF_VERSION: "1.15.4"
-  AWS_REGION: ${{ vars.AWS_REGION }}
-  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+
+concurrency:
+  group: terraform-bootstrap-${{ inputs.target }}
+  cancel-in-progress: false
 
 jobs:
   bootstrap:
-    name: Create state backend
+    name: Create ${{ inputs.target }} state backend
     runs-on: ubuntu-latest
+    environment: ${{ inputs.target }}
+    env:
+      TF_STATE_REGION: ${{ vars.TF_STATE_REGION }}
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -32,14 +47,14 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: ${{ env.TF_STATE_REGION }}
           mask-aws-account-id: true
 
       - name: Create backend bucket
         run: |
           terraform -chdir=bootstrap init -backend=false -input=false
           terraform -chdir=bootstrap apply -auto-approve -input=false \
-            -var="aws_region=${AWS_REGION}" \
+            -var="aws_region=${TF_STATE_REGION}" \
             -var="state_bucket_name=${TF_STATE_BUCKET}"
 
       - name: Store bootstrap state in the new bucket
@@ -48,6 +63,6 @@ jobs:
           terraform -chdir=bootstrap init -input=false -migrate-state -force-copy \
             -backend-config="bucket=${TF_STATE_BUCKET}" \
             -backend-config="key=bootstrap/terraform.tfstate" \
-            -backend-config="region=${AWS_REGION}" \
+            -backend-config="region=${TF_STATE_REGION}" \
             -backend-config="encrypt=true" \
             -backend-config="use_lockfile=true"
