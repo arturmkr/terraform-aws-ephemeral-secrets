@@ -1,11 +1,11 @@
 name: Infra Bootstrap
-run-name: Create state backend · ${{ inputs.target }}
+run-name: Manage state backend · ${{ inputs.target }}
 
 on:
   workflow_dispatch:
     inputs:
       target:
-        description: Environment backend to create
+        description: Environment backend to manage
         required: true
         type: choice
         options:
@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   bootstrap:
-    name: Create ${{ inputs.target }} state backend
+    name: Manage ${{ inputs.target }} state backend
     runs-on: ubuntu-latest
     environment: ${{ inputs.target }}
     env:
@@ -50,14 +50,46 @@ jobs:
           aws-region: ${{ env.TF_STATE_REGION }}
           mask-aws-account-id: true
 
-      - name: Create backend bucket
+      - name: Detect existing backend
+        id: backend
+        shell: bash
         run: |
-          terraform -chdir=bootstrap init -backend=false -input=false
+          set +e
+          backend_result=$(aws s3api get-bucket-location --bucket "${TF_STATE_BUCKET}" 2>&1)
+          backend_status=$?
+          set -e
+
+          if [[ "${backend_status}" -eq 0 ]]; then
+            echo "exists=true" >> "${GITHUB_OUTPUT}"
+          elif [[ "${backend_result}" == *"NoSuchBucket"* ]]; then
+            echo "exists=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "::error::Unable to access the configured state bucket. Check its name, account and permissions."
+            exit 1
+          fi
+
+      - name: Initialize bootstrap state
+        run: |
+          if [[ "${{ steps.backend.outputs.exists }}" == "true" ]]; then
+            printf 'terraform {\n  backend "s3" {}\n}\n' > bootstrap/backend_override.tf
+            terraform -chdir=bootstrap init -input=false \
+              -backend-config="bucket=${TF_STATE_BUCKET}" \
+              -backend-config="key=bootstrap/terraform.tfstate" \
+              -backend-config="region=${TF_STATE_REGION}" \
+              -backend-config="encrypt=true" \
+              -backend-config="use_lockfile=true"
+          else
+            terraform -chdir=bootstrap init -backend=false -input=false
+          fi
+
+      - name: Apply backend configuration
+        run: |
           terraform -chdir=bootstrap apply -auto-approve -input=false \
             -var="aws_region=${TF_STATE_REGION}" \
             -var="state_bucket_name=${TF_STATE_BUCKET}"
 
       - name: Store bootstrap state in the new bucket
+        if: steps.backend.outputs.exists == 'false'
         run: |
           printf 'terraform {\n  backend "s3" {}\n}\n' > bootstrap/backend_override.tf
           terraform -chdir=bootstrap init -input=false -migrate-state -force-copy \

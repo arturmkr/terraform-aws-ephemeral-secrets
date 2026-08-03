@@ -1,0 +1,180 @@
+name: Infra Checks
+run-name: Check infra changes · PR #${{ github.event.pull_request.number }}
+
+on:
+  pull_request:
+    paths:
+      - "bootstrap/**"
+      - "environments/**"
+      - "modules/**"
+      - ".github/workflows/**"
+      - "Makefile"
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: terraform-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  TF_VERSION: "1.15.4"
+
+jobs:
+  changes:
+    name: Detect affected roots
+    runs-on: ubuntu-latest
+    outputs:
+      environments: ${{ steps.environments.outputs.changes }}
+      bootstrap: ${{ steps.bootstrap.outputs.bootstrap }}
+    steps:
+      - name: Detect changed environments
+        id: environments
+        uses: dorny/paths-filter@v4
+        with:
+          filters: |
+            dev:
+              - "environments/dev/**"
+              - "modules/**"
+            stage:
+              - "environments/stage/**"
+              - "modules/**"
+
+      - name: Detect bootstrap changes
+        id: bootstrap
+        uses: dorny/paths-filter@v4
+        with:
+          filters: |
+            bootstrap:
+              - "bootstrap/**"
+
+  format:
+    name: Check formatting
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Check formatting
+        run: terraform fmt -check -recursive
+
+  validate-environments:
+    name: Validate ${{ matrix.environment }}
+    needs: [changes, format]
+    if: needs.changes.outputs.environments != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: ${{ fromJSON(needs.changes.outputs.environments) }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Validate root
+        run: |
+          terraform -chdir="environments/${{ matrix.environment }}" init -backend=false -input=false
+          terraform -chdir="environments/${{ matrix.environment }}" validate
+
+  validate-bootstrap:
+    name: Validate bootstrap
+    needs: [changes, format]
+    if: needs.changes.outputs.bootstrap == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Validate root
+        run: |
+          terraform -chdir=bootstrap init -backend=false -input=false
+          terraform -chdir=bootstrap validate
+
+  plan:
+    name: Plan ${{ matrix.environment }}
+    needs: [changes, format, validate-environments]
+    if: >-
+      needs.changes.outputs.environments != '[]' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    environment: ${{ matrix.environment }}
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: ${{ fromJSON(needs.changes.outputs.environments) }}
+    permissions:
+      contents: read
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      TF_STATE_REGION: ${{ secrets.TF_STATE_REGION }}
+      TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
+      TF_STATE_KEY: secure-secrets/${{ matrix.environment }}/terraform.tfstate
+      TF_VAR_aws_region: ${{ secrets.AWS_REGION }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.1.2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: true
+
+      - name: Initialize S3 backend
+        run: |
+          terraform -chdir="environments/${{ matrix.environment }}" init -input=false \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="key=${TF_STATE_KEY}" \
+            -backend-config="region=${TF_STATE_REGION}"
+
+      - name: Plan changes and drift
+        id: plan
+        run: |
+          set +e
+          terraform -chdir="environments/${{ matrix.environment }}" plan \
+            -input=false \
+            -no-color \
+            -detailed-exitcode \
+            -out=tfplan
+          plan_exit_code=$?
+          set -e
+
+          if [[ "${plan_exit_code}" -eq 1 ]]; then
+            exit 1
+          fi
+
+          if [[ "${plan_exit_code}" -eq 2 ]]; then
+            echo "Terraform detected proposed changes or infrastructure drift."
+          else
+            echo "Terraform configuration and remote infrastructure are in sync."
+          fi

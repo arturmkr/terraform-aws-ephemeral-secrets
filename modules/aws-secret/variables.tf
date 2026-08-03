@@ -26,13 +26,13 @@ variable "secret_value" {
   ephemeral   = true
 }
 
-variable "value_version" {
-  description = "Non-secret rotation counter. Increment to write a newly generated version."
+variable "secret_version" {
+  description = "Non-secret version number. Increment to write a newly generated secret value."
   type        = number
 
   validation {
-    condition     = var.value_version >= 1 && floor(var.value_version) == var.value_version
-    error_message = "value_version must be a positive integer."
+    condition     = var.secret_version >= 1 && floor(var.secret_version) == var.secret_version
+    error_message = "secret_version must be a positive integer."
   }
 }
 

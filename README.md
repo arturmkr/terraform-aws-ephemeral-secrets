@@ -17,10 +17,9 @@ value during provisioning, and writes it directly to Secrets Manager.
 ## Design
 
 ```text
-environments/dev
-    └── application-secrets       complete application secret catalog
-            ├── builders/*        generate values by format
-            └── aws-secret        writes an opaque value to AWS
+environments/dev ─┐
+                  ├── orders-api-secrets ── builders/* ── aws-secret
+environments/stage┘
 ```
 
 The example catalog contains four formats taken from the original use case:
@@ -37,66 +36,87 @@ opaque ephemeral value and writes it using `secret_string_wo`:
 resource "aws_secretsmanager_secret_version" "current" {
   secret_id                = aws_secretsmanager_secret.this.id
   secret_string_wo         = var.secret_value
-  secret_string_wo_version = var.value_version
+  secret_string_wo_version = var.secret_version
 }
 ```
 
 Regular generated resources store their results in Terraform state. Here,
 generation uses ephemeral resources and the AWS write-only argument is the
 boundary at which the value leaves Terraform. Outputs expose only names, ARNs,
-AWS version IDs, and non-secret rotation counters.
+AWS version IDs, and configured secret version numbers.
 
-## Adding and rotating secrets
+## Adding and regenerating secrets
 
-Application secrets are declared in `modules/application-secrets/main.tf`.
+Orders API secrets are declared in `modules/orders-api-secrets/main.tf`.
 Adding another secret of an existing format means adding one catalog entry.
 
-Every entry starts with `value_version = 1`. Repeated applies and metadata-only
+Every entry starts with `version = 1`. Repeated applies and metadata-only
 changes keep the existing value. Incrementing the counter writes one new AWS
-version without replacing the secret:
+version without replacing the secret. Environment-specific overrides live in
+`environments/dev/config.tf`:
 
 ```hcl
-value_versions = {
-  "shared-key" = 2
+locals {
+  # An empty map means every secret is on version 1.
+  orders_api_secret_versions = {
+    "shared-key" = 2 # Generate a new value only for this dev secret.
+  }
 }
 ```
+
+`dev` and `stage` use the same Orders API secret set but have independent state,
+secret names, tags, and optional version overrides.
 
 ## Repository structure
 
 ```text
 bootstrap/                    S3 backend with encryption, versioning and locking
 environments/dev/             deployable Terraform root
-modules/application-secrets/  application secret catalog
+  config.tf                   dev name, tags and secret version overrides
+environments/stage/           independent stage root using the same catalog
+modules/orders-api-secrets/   complete Orders API secret set
 modules/builders/             four value builders
 modules/aws-secret/           AWS Secrets Manager writer
-.github/workflows/            bootstrap, pull request and apply/destroy
+.github/workflows/            infrastructure bootstrap, checks and deployment
 ```
 
 ## GitHub Actions
 
-Configure these GitHub Actions secrets:
+Create GitHub Environments named `dev` and `stage`. Configure these values in
+each environment:
 
-- `AWS_ACCESS_KEY_ID`;
-- `AWS_SECRET_ACCESS_KEY`.
-
-Configure these repository variables:
-
-- `AWS_REGION`;
-- `TF_STATE_BUCKET` — globally unique S3 bucket name;
-- `TF_STATE_KEY` — for example `orders-api/dev/terraform.tfstate`;
-- `APPLICATION_NAME` — for example `orders-api`.
+- `AWS_ACCESS_KEY_ID` — secret;
+- `AWS_SECRET_ACCESS_KEY` — secret;
+- `AWS_REGION` — secret;
+- `TF_STATE_REGION` — secret containing the S3 state bucket region;
+- `TF_STATE_BUCKET` — secret containing a globally unique bucket name.
 
 The AWS principal needs access to the state bucket and the application's
 Secrets Manager path.
 
+Each environment can point to a different AWS account, region and state bucket.
+No approval is required unless an environment protection rule is enabled.
+
 Deployment flow:
 
-1. Run **Bootstrap Terraform backend** once to create the S3 backend.
-2. Pull requests run `fmt`, `validate`, and a remote `plan`.
-3. A push to `main` creates and applies a fresh plan.
-4. **Terraform infrastructure** can be started manually with `apply` or
-   `destroy`.
+1. Run **Infra Bootstrap** once for `dev` and once for `stage`.
+   The selected GitHub Environment provides that account's credentials and
+   state bucket name. Bootstrap is intentionally a separate administrative
+   workflow; regular pull requests and deployments assume the backend exists.
+2. Pull requests validate and plan only environments affected by the changes.
+   A change under `modules/` checks both `dev` and `stage`.
+3. A push to `main` applies only the affected environments.
+4. **Infra Deploy** can manually `apply` or `destroy` `dev`, `stage`, or `all`.
 
+Each environment stores its state in its own bucket:
+
+```text
+dev account   → dev state bucket   → secure-secrets/dev/terraform.tfstate
+stage account → stage state bucket → secure-secrets/stage/terraform.tfstate
+```
+
+Manual `destroy` is included only to clean up this sandbox after testing. A
+production deployment workflow would normally disable unrestricted destroy.
 Destroy keeps the backend and schedules secret deletion using AWS's seven-day
 recovery window.
 
